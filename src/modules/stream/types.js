@@ -6,10 +6,6 @@ import { request } from "undici";
 import { create as contentDisposition } from "content-disposition-header";
 import { AbortController } from "abort-controller"
 
-function closeRequest(controller) {
-    try { controller.abort() } catch {}
-}
-
 function closeResponse(res) {
     if (!res.headersSent) res.sendStatus(500);
     return res.destroy();
@@ -37,7 +33,7 @@ function pipe(from, to, done) {
 
 export async function streamDefault(streamInfo, res) {
     const abortController = new AbortController();
-    const shutdown = () => (closeRequest(abortController), closeResponse(res));
+    const shutdown = () => (abortController.abort(), closeResponse(res));
 
     try {
         const filename = streamInfo.isAudioOnly ? `${streamInfo.filename}.${streamInfo.audioFormat}` : streamInfo.filename;
@@ -52,7 +48,8 @@ export async function streamDefault(streamInfo, res) {
         res.setHeader('content-type', headers['content-type']);
         res.setHeader('content-length', headers['content-length']);
 
-        pipe(stream, res, shutdown);
+        stream.on('error', shutdown)
+              .pipe(res).on('error', shutdown);
     } catch {
         shutdown();
     }
@@ -60,7 +57,7 @@ export async function streamDefault(streamInfo, res) {
 
 export async function streamLiveRender(streamInfo, res) {
     let abortController = new AbortController(), process;
-    const shutdown = () => (closeRequest(abortController), killProcess(process), closeResponse(res));
+    const shutdown = () => (abortController.abort(), process?.kill(), closeResponse(res));
 
     try {
         if (streamInfo.urls.length !== 2) return shutdown();
@@ -91,18 +88,16 @@ export async function streamLiveRender(streamInfo, res) {
             ],
         });
 
-        const [,,, audioInput, muxOutput] = process.stdio;
-
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('Content-Disposition', contentDisposition(streamInfo.filename));
 
-        audio.on('error', shutdown);
-        audioInput.on('error', shutdown);
-        audio.pipe(audioInput);
-        pipe(muxOutput, res, shutdown);
+        audio.on('error', shutdown)
+             .pipe(process.stdio[3]).on('error', shutdown);
 
+        process.stdio[4].pipe(res).on('error', shutdown);
         process.on('close', shutdown);
         res.on('finish', shutdown);
+        res.on('close', shutdown);
     } catch {
         shutdown();
     }
@@ -110,7 +105,7 @@ export async function streamLiveRender(streamInfo, res) {
 
 export function streamAudioOnly(streamInfo, res) {
     let process;
-    const shutdown = () => (killProcess(process), closeResponse(res));
+    const shutdown = () => (process?.kill(), closeResponse(res));
 
     try {
         let args = [
@@ -149,8 +144,10 @@ export function streamAudioOnly(streamInfo, res) {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('Content-Disposition', contentDisposition(`${streamInfo.filename}.${streamInfo.audioFormat}`));
 
-        pipe(muxOutput, res, shutdown);
+        process.stdio[3].pipe(res);
+        process.on('close', shutdown);
         res.on('finish', shutdown);
+        res.on('close', shutdown);
     } catch {
         shutdown();
     }
@@ -158,7 +155,7 @@ export function streamAudioOnly(streamInfo, res) {
 
 export function streamVideoOnly(streamInfo, res) {
     let process;
-    const shutdown = () => (killProcess(process), closeResponse(res));
+    const shutdown = () => (process?.kill(), closeResponse(res));
 
     try {
         let args = [
@@ -187,10 +184,10 @@ export function streamVideoOnly(streamInfo, res) {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('Content-Disposition', contentDisposition(streamInfo.filename));
 
-        pipe(muxOutput, res, shutdown);
-
+        process.stdio[3].pipe(res);
         process.on('close', shutdown);
         res.on('finish', shutdown);
+        res.on('close', shutdown);
     } catch {
         shutdown();
     }
