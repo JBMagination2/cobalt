@@ -12,23 +12,11 @@ function closeResponse(res) {
 }
 
 function killProcess(p) {
-    // ask the process to terminate itself gracefully
-    p?.kill('SIGTERM');
+    p?.kill();
     setTimeout(() => {
         if (p?.exitCode === null)
-            // brutally murder the process if it didn't quit
-            p?.kill('SIGKILL');
+            p?.kill(9);
     }, 5000);
-}
-
-function pipe(from, to, done) {
-    from.on('error', done)
-        .on('close', done);
-
-    to.on('error', done)
-      .on('close', done);
-
-    from.pipe(to);
 }
 
 export async function streamDefault(streamInfo, res) {
@@ -57,7 +45,7 @@ export async function streamDefault(streamInfo, res) {
 
 export async function streamLiveRender(streamInfo, res) {
     let abortController = new AbortController(), process;
-    const shutdown = () => (abortController.abort(), process?.kill(), closeResponse(res));
+    const shutdown = () => (abortController.abort(), killProcess(process), closeResponse(res));
 
     try {
         if (streamInfo.urls.length !== 2) return shutdown();
@@ -105,7 +93,7 @@ export async function streamLiveRender(streamInfo, res) {
 
 export function streamAudioOnly(streamInfo, res) {
     let process;
-    const shutdown = () => (process?.kill(), closeResponse(res));
+    const shutdown = () => (killProcess(process), closeResponse(res));
 
     try {
         let args = [
@@ -155,7 +143,7 @@ export function streamAudioOnly(streamInfo, res) {
 
 export function streamVideoOnly(streamInfo, res) {
     let process;
-    const shutdown = () => (process?.kill(), closeResponse(res));
+    const shutdown = () => (killProcess(process), closeResponse(res));
 
     try {
         let args = [
